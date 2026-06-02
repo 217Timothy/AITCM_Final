@@ -20,3 +20,4 @@ __pycache__/
 
 # 其他腳本（只保留 preprocess）
 check_dataset.py
+PregnancyDetection.pdf

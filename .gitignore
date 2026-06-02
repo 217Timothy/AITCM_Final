@@ -1,0 +1,22 @@
+# 原始資料
+孕婦組/
+對照組/
+
+# 產生的資料集
+*.npz
+*.npy
+TARNet_data_v1/
+TARNet_data_v2/
+TARNet_data/
+
+# 圖片
+*.png
+
+# Python 雜檔
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# 其他腳本（只保留 preprocess）
+check_dataset.py

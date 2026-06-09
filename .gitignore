@@ -9,6 +9,8 @@ TARNet_data_v1/
 TARNet_data_v2/
 TARNet_data_v3/
 TARNet_data/
+TARNet/
+trained_models/
 
 # 圖片
 *.png
@@ -25,3 +27,5 @@ __pycache__/
 # 其他腳本（只保留 preprocess）
 check_dataset.py
 PregnancyDetection.pdf
+
+*.ipynb

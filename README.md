@@ -74,11 +74,85 @@
 
 ---
 
+## TARNet Training Pipeline
+
+### tarnet_v3_pipeline.py
+
+`tarnet_v3_pipeline.py` 是把 v3 的 5 秒 sliding-window 資料轉成 TARNet-style 資料夾格式的工具。
+
+它不是重新做 raw data preprocessing，而是接在 `preprocess_v3_tarnet.py` 後面使用。
+
+**它做的事情：**
+1. 讀取 `dataset_v3_tarnet.npz`
+2. 檢查 train/test 是否有受試者重疊，避免 data leakage
+3. 將 `X_train`, `X_test` 從 `(N, 500)` 轉成 TARNet 較常用的 `(N, 500, 1)`
+4. 輸出到 `TARNet/data/PREG_5SEC_SUBJECT_CLEAN/`
+5. 保留 `train_subject_ids.npy` 和 `test_subject_ids.npy`，方便做 subject-level voting
+
+**為什麼需要這支腳本：**
+- 同學 notebook 原本寫死 Colab 路徑 `/content/...`
+- notebook 的 wave-level split 版本會讓同一位受試者同時出現在 train/test
+- notebook 使用 peak-to-peak 單波 `(N, 128, 1)`，不是 paper 提到的 5 秒 window
+- notebook 沒有使用我們 v3 裡的 IrrHB / RR quality filtering 結果
+
+**目前轉出的 TARNet 資料格式：**
+- `X_train`: `(26674, 500, 1)`
+- `X_test`: `(6421, 500, 1)`
+- Train labels：孕婦 13337 / 對照 13337
+- Train/Test subject overlap：0
+
+**使用方式：**
+
+只準備 TARNet 資料，不訓練：
+
+```bash
+python3 preprocess_v3_tarnet.py
+python3 tarnet_v3_pipeline.py --prepare-only
+```
+
+### train_tarnet_v3.py
+
+`train_tarnet_v3.py` 是本專案自己實作的 TARNet-inspired 訓練程式，不需要 pull 官方 TARNet repo。
+
+**模型設計：**
+1. 輸入 5 秒 PPG window：`(N, 500)`
+2. 使用 linear projection 將單通道 PPG 轉成 embedding
+3. 加入 sinusoidal positional encoding
+4. 使用 Transformer Encoder 建立 time-series representation
+5. 使用 classification head 做孕婦 / 對照組二分類
+6. 同時加入 masked reconstruction loss，讓模型在分類之外也學會重建被遮住的 PPG 時間點
+7. 可選擇加入 v3 產生的輔助特徵：`rr_mean`, `rr_std`, `heart_rate`, `ri_mean`, `ri_std`, `auc_mean`, `clean_beat_count`
+
+**訓練流程：**
+- 從 `dataset_v3_tarnet.npz` 讀資料
+- 保持原本 subject-level test split
+- 再從 train subjects 中切出 validation subjects
+- 用 validation accuracy 選 best model
+- 最後輸出 window-level 與 subject-level test results
+
+**輸出：**
+- `trained_models/self_tarnet_v3/best_model.pt`
+- `trained_models/self_tarnet_v3/results.json`
+
+**使用方式：**
+
+```bash
+python3 preprocess_v3_tarnet.py
+python3 train_tarnet_v3.py --epochs 80 --use-features
+```
+
+---
+
 ## Requirements
 
+```bash
+pip install -r requirements.txt
 ```
-numpy
-```
+
+主要套件：
+- `numpy`：資料前處理與 `.npy/.npz` 儲存
+- `matplotlib`：`check_dataset.py` 視覺化
+- `torch`：`train_tarnet_v3.py` 模型訓練
 
 ## Usage
 
@@ -86,4 +160,6 @@ numpy
 python preprocess.py    # 產生 v1 資料集
 python preprocess_v2.py # 產生 v2 資料集
 python preprocess_v3_tarnet.py # 產生 v3 TARNet 5 秒 window 資料集
+python tarnet_v3_pipeline.py --prepare-only # 轉成 TARNet 可讀格式
+python train_tarnet_v3.py --epochs 80 --use-features # 訓練自寫 TARNet-inspired 模型
 ```

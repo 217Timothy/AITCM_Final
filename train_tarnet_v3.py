@@ -53,12 +53,21 @@ def base_subject_id(sid: object) -> str:
     return text[:-4] if text.endswith("_aug") else text
 
 
-def split_train_val_by_subject(subject_ids, val_size=0.2, seed=42):
+def split_train_val_by_subject(subject_ids, labels, val_size=0.2, seed=42):
     rng = np.random.default_rng(seed)
-    subjects = np.array(sorted({base_subject_id(s) for s in subject_ids}))
-    rng.shuffle(subjects)
-    n_val = max(1, round(len(subjects) * val_size))
-    val_subjects = set(subjects[:n_val])
+
+    subject_to_label = {}
+    for sid, label in zip(subject_ids, labels):
+        base = base_subject_id(sid)
+        subject_to_label.setdefault(base, int(label))
+
+    val_subjects = set()
+    for label in sorted(set(subject_to_label.values())):
+        subjects = np.array(sorted([sid for sid, y in subject_to_label.items() if y == label]))
+        rng.shuffle(subjects)
+        n_val = max(1, round(len(subjects) * val_size))
+        val_subjects.update(subjects[:n_val])
+
     train_mask = np.array([base_subject_id(s) not in val_subjects for s in subject_ids])
     val_mask = ~train_mask
     return train_mask, val_mask
@@ -87,7 +96,7 @@ def load_dataset(path: Path, val_size: float, seed: int, use_features: bool):
     if overlap:
         raise ValueError(f"Subject leakage detected between train/test: {overlap}")
 
-    train_mask, val_mask = split_train_val_by_subject(sid_train_full, val_size, seed)
+    train_mask, val_mask = split_train_val_by_subject(sid_train_full, y_train_full, val_size, seed)
 
     X_train = X_train_full[train_mask]
     y_train = y_train_full[train_mask]

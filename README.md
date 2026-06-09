@@ -136,6 +136,14 @@ python3 tarnet_v3_pipeline.py --prepare-only
 - `trained_models/self_tarnet_v3/last_checkpoint.pt`
 - `trained_models/self_tarnet_v3/results.json`
 
+`results.json` 會記錄：
+- `history[].train.loss` / `history[].train.accuracy`
+- 使用 `--monitor test` 時，會多記 `history[].monitor_test.loss` / `history[].monitor_test.accuracy`
+- `final_train`
+- `final_monitor`
+- `window_level_test`
+- `subject_level_test`
+
 **使用方式：**
 
 ```bash

@@ -535,7 +535,7 @@ def train(args):
 
         row = {"epoch": epoch, "train": train_metrics}
         if val_metrics is not None:
-            row["val"] = val_metrics
+            row[f"monitor_{monitor_name}"] = val_metrics
         history.append(row)
 
         current_score = train_metrics["loss"]
@@ -607,6 +607,8 @@ def train(args):
         "selection_mode": selection_mode,
         "monitor": monitor_name,
         "best_score": float(best_score),
+        "final_train": history[-1]["train"] if history else None,
+        "final_monitor": history[-1].get(f"monitor_{monitor_name}") if history and monitor_name else None,
         "window_level_test": test_metrics,
         "subject_level_test": subject_metrics,
         "subject_rows": subject_rows,

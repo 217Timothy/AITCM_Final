@@ -2,7 +2,7 @@
 
 ## Data Preprocessing
 
-本專案提供兩個前處理腳本，皆使用 Subject-level train/test split（依人切分，避免 data leakage）。
+本專案提供三個前處理腳本，皆使用 Subject-level train/test split（依人切分，避免 data leakage）。
 
 ---
 
@@ -35,15 +35,42 @@
 2. **RR interval 過濾**：移除心率超過 200 bpm（< 0.3s）或低於 40 bpm（> 1.5s）的異常波形
 3. **Linear Detrend**：對每個波形做線性去趨勢，移除基線漂移（baseline wander）後再正規化
 
-**新增 Augmentation 方法（共五種，每次隨機挑一種）：**
+**Augmentation：**
 - Jittering：加入高斯白雜訊
 - Scaling：隨機縮放振幅
-- **Time Warping**：對時間軸做非線性扭曲，模擬心率細微變動
-- **Magnitude Warping**：對振幅疊加 smooth 隨機曲線，模擬血壓輕微波動
-- **Window Slicing**：隨機截取子段後 resize 回原長度，增加局部特徵的不變性
-- 複製 3 倍
+- Time Warping / Magnitude Warping / Window Slicing 保留在 v2 腳本中，但不建議作為最終版本，因為可能破壞 PPG 形態與 RI 等波形特徵。
+- 目前 v2 已改為只在需要時補到 train set 類別接近平衡。
 
 **輸出：** `dataset_v2.npz`、`TARNet_data_v2/`（X_train, y_train, X_test, y_test）
+
+---
+
+### preprocess_v3_tarnet.py（v3 — 貼近 Paper / TARNet 的 5 秒 sliding window）
+
+此版本依論文描述建立較適合 TARNet 類 time-series model 的資料格式。
+
+**前處理流程：**
+1. 讀取 500 Hz 原始 PPG 訊號
+2. 使用 5:1 downsampling，轉為 100 Hz
+3. 以 5 秒 sliding window 切段，每個 window 為 500 點
+4. 使用 `peakposition.txt` 計算 RR interval，並用 `IrrHBPosition.txt` 做品質過濾
+5. 對每個 window 做 linear detrend 與 min-max 正規化
+6. 保留 optional auxiliary features：`rr_mean`, `rr_std`, `heart_rate`, `ri_mean`, `ri_std`, `auc_mean`, `clean_beat_count`
+
+**Data Augmentation：**
+- 僅使用論文提到且較保守的 jittering / scaling
+- 只用在 train set，且只在類別不平衡時補到平衡
+- 不使用 time warping、magnitude warping、window slicing
+
+**輸出：** `dataset_v3_tarnet.npz`、`TARNet_data_v3/`
+
+目前產生的資料：
+- `X_train`: `(26674, 500)`
+- `X_test`: `(6421, 500)`
+- `F_train`: `(26674, 7)`
+- Train labels：孕婦 13337 / 對照 13337
+- Test labels：孕婦 3829 / 對照 2592
+- Train/Test subject overlap：0
 
 ---
 
@@ -58,4 +85,5 @@ numpy
 ```bash
 python preprocess.py    # 產生 v1 資料集
 python preprocess_v2.py # 產生 v2 資料集
+python preprocess_v3_tarnet.py # 產生 v3 TARNet 5 秒 window 資料集
 ```

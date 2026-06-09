@@ -7,10 +7,14 @@
 *.npy
 TARNet_data_v1/
 TARNet_data_v2/
+TARNet_data_v3/
 TARNet_data/
 
 # 圖片
 *.png
+
+*.xlsx
+AGENTS.md
 
 # Python 雜檔
 __pycache__/

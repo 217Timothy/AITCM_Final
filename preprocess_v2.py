@@ -39,7 +39,8 @@ TEST_SIZE   = 0.2
 RANDOM_SEED = 42
 
 # Augmentation 設定
-AUG_TIMES = 3   # 每個波形產生幾個 augmented 版本（v1 是 4，這裡改小因為方法更多樣）
+AUG_TIMES = 3   # 備用上限：每個波形最多產生幾個 augmented 版本
+BALANCE_TRAIN_CLASSES = True  # True: 只補到 train set 孕婦/對照數量接近平衡
 
 LABEL_PREGNANT = 1
 LABEL_CONTROL  = 0
@@ -262,11 +263,24 @@ def augment_one(wave):
     return method(wave)
 
 
-def augment_waves(waves, times=AUG_TIMES):
-    """對一組波形做 augmentation，回傳 augmented 版本（不含原始）"""
+def augment_waves(waves, times=AUG_TIMES, target_count=None):
+    """
+    對一組波形做 augmentation，回傳 augmented 版本（不含原始）。
+    target_count 可用來指定要產生幾筆，避免少數類 augmentation 後反而變多數類。
+    """
     augmented = []
-    for wave in waves:
-        for _ in range(times):
+    if target_count is None:
+        target_count = len(waves) * times
+    if len(waves) == 0 or target_count <= 0:
+        return augmented
+
+    rng = np.random.default_rng(RANDOM_SEED)
+    while len(augmented) < target_count:
+        order = rng.permutation(len(waves))
+        for idx in order:
+            if len(augmented) >= target_count:
+                break
+            wave = waves[idx]
             augmented.append(augment_one(wave))
     return augmented
 
@@ -342,9 +356,18 @@ def main():
 
     # Augmentation（只對 train 的孕婦）
     print("\n" + "=" * 55)
-    print(f"Augmentation (x{AUG_TIMES})，使用 5 種方法隨機組合...")
-    aug_waves = augment_waves(list(X_p_train), times=AUG_TIMES)
-    X_aug = np.array(aug_waves, dtype=np.float32)
+    if BALANCE_TRAIN_CLASSES:
+        target_aug_count = max(0, len(X_c_train) - len(X_p_train))
+        print(f"Augmentation 補到類別平衡，預計新增 {target_aug_count} 筆孕婦波形...")
+    else:
+        target_aug_count = None
+        print(f"Augmentation (x{AUG_TIMES})，使用 5 種方法隨機組合...")
+
+    aug_waves = augment_waves(list(X_p_train), times=AUG_TIMES, target_count=target_aug_count)
+    if len(aug_waves) == 0:
+        X_aug = np.empty((0, TARGET_LEN), dtype=np.float32)
+    else:
+        X_aug = np.array(aug_waves, dtype=np.float32)
     y_aug = np.full(len(X_aug), LABEL_PREGNANT, dtype=np.int32)
 
     # 合併
@@ -353,12 +376,12 @@ def main():
     X_test  = np.concatenate([X_p_test,  X_c_test])
     y_test  = np.concatenate([y_p_test,  y_c_test])
 
-    # Shuffle
+    # Shuffle：X 和 y 必須使用同一個 permutation，避免波形和標籤錯配
     rng = np.random.default_rng(RANDOM_SEED)
-    X_train = X_train[rng.permutation(len(X_train))]
-    y_train = y_train[rng.permutation(len(y_train))]
-    X_test  = X_test[rng.permutation(len(X_test))]
-    y_test  = y_test[rng.permutation(len(y_test))]
+    train_perm = rng.permutation(len(X_train))
+    test_perm  = rng.permutation(len(X_test))
+    X_train, y_train = X_train[train_perm], y_train[train_perm]
+    X_test,  y_test  = X_test[test_perm],   y_test[test_perm]
 
     # 存成 .npz（一個檔案）
     np.savez(OUTPUT_PATH,

@@ -125,10 +125,10 @@ python3 tarnet_v3_pipeline.py --prepare-only
 
 **訓練流程：**
 - 從 `dataset_v3_tarnet.npz` 讀資料
-- 保持原本 subject-level test split
-- 再從 train subjects 中切出 validation subjects
-- 用 validation accuracy 選 best model
-- 最後輸出 window-level 與 subject-level test results
+- 使用前處理產生的 subject-level train/test split
+- 預設只使用 train 和 test，不另外切 validation
+- 用 train loss 儲存訓練期間最佳模型
+- 訓練完成後才用 test 輸出 window-level 與 subject-level results
 
 **輸出：**
 - `trained_models/self_tarnet_v3/best_model.pt`
@@ -147,6 +147,14 @@ python3 train_tarnet_v3.py --epochs 80 --use-features
 ```bash
 python3 train_tarnet_v3.py --epochs 80 --use-features --resume
 ```
+
+如果想做較嚴謹的 train/validation/test 實驗，可以加 `--use-validation`，它會只從 train subjects 裡再切 validation subjects：
+
+```bash
+python3 train_tarnet_v3.py --epochs 80 --use-features --use-validation
+```
+
+除非只是 debug，不建議使用 `--test-as-val`，因為它會讓 test set 參與 best model selection。
 
 ---
 

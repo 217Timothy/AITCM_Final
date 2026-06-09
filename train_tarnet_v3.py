@@ -136,6 +136,99 @@ def load_dataset(path: Path, val_size: float, seed: int, use_features: bool):
     }
 
 
+def load_dataset_with_test_as_val(path: Path, use_features: bool):
+    data = np.load(path, allow_pickle=True)
+
+    X_train = data["X_train"].astype(np.float32)
+    y_train = data["y_train"].astype(np.int64)
+    sid_train = data["subject_ids_train"]
+
+    X_test = data["X_test"].astype(np.float32)
+    y_test = data["y_test"].astype(np.int64)
+    sid_test = data["subject_ids_test"]
+
+    train_subjects = {base_subject_id(s) for s in sid_train}
+    test_subjects = {base_subject_id(s) for s in sid_test}
+    overlap = sorted(train_subjects & test_subjects)
+    if overlap:
+        raise ValueError(f"Subject leakage detected between train/test: {overlap}")
+
+    feature_payload = None
+    if use_features:
+        F_train = data["F_train"].astype(np.float32)
+        F_test = data["F_test"].astype(np.float32)
+        F_train, F_val, F_test, feat_mean, feat_std = standardize_features(F_train, F_test, F_test)
+        feature_payload = {
+            "F_train": F_train.astype(np.float32),
+            "F_val": F_val.astype(np.float32),
+            "F_test": F_test.astype(np.float32),
+            "feature_names": data.get("feature_names", np.array([])),
+            "feature_mean": feat_mean.astype(np.float32),
+            "feature_std": feat_std.astype(np.float32),
+        }
+
+    return {
+        "X_train": X_train,
+        "y_train": y_train,
+        "sid_train": sid_train,
+        "X_val": X_test,
+        "y_val": y_test,
+        "sid_val": sid_test,
+        "X_test": X_test,
+        "y_test": y_test,
+        "sid_test": sid_test,
+        "features": feature_payload,
+    }
+
+
+def load_dataset_train_test_only(path: Path, use_features: bool):
+    data = np.load(path, allow_pickle=True)
+
+    X_train = data["X_train"].astype(np.float32)
+    y_train = data["y_train"].astype(np.int64)
+    sid_train = data["subject_ids_train"]
+
+    X_test = data["X_test"].astype(np.float32)
+    y_test = data["y_test"].astype(np.int64)
+    sid_test = data["subject_ids_test"]
+
+    train_subjects = {base_subject_id(s) for s in sid_train}
+    test_subjects = {base_subject_id(s) for s in sid_test}
+    overlap = sorted(train_subjects & test_subjects)
+    if overlap:
+        raise ValueError(f"Subject leakage detected between train/test: {overlap}")
+
+    feature_payload = None
+    if use_features:
+        F_train = data["F_train"].astype(np.float32)
+        F_test = data["F_test"].astype(np.float32)
+        feat_mean = F_train.mean(axis=0, keepdims=True)
+        feat_std = F_train.std(axis=0, keepdims=True) + 1e-6
+        F_train = (F_train - feat_mean) / feat_std
+        F_test = (F_test - feat_mean) / feat_std
+        feature_payload = {
+            "F_train": F_train.astype(np.float32),
+            "F_val": None,
+            "F_test": F_test.astype(np.float32),
+            "feature_names": data.get("feature_names", np.array([])),
+            "feature_mean": feat_mean.astype(np.float32),
+            "feature_std": feat_std.astype(np.float32),
+        }
+
+    return {
+        "X_train": X_train,
+        "y_train": y_train,
+        "sid_train": sid_train,
+        "X_val": None,
+        "y_val": None,
+        "sid_val": None,
+        "X_test": X_test,
+        "y_test": y_test,
+        "sid_test": sid_test,
+        "features": feature_payload,
+    }
+
+
 def make_components():
     torch, nn, torch_F, DataLoader, Dataset = require_torch()
 
@@ -327,7 +420,20 @@ def run_epoch(model, loader, optimizer, device, mask_ratio, recon_rate, train=Tr
 def train(args):
     torch, nn, torch_F, DataLoader, PPGDataset, SelfTARNet = make_components()
 
-    payload = load_dataset(args.dataset, args.val_size, args.seed, args.use_features)
+    if args.use_validation:
+        payload = load_dataset(args.dataset, args.val_size, args.seed, args.use_features)
+        selection_mode = "validation_accuracy"
+    elif args.test_as_val:
+        print(
+            "WARNING: --test-as-val uses the test set for model selection. "
+            "The final test metrics are inference-style monitoring, not an unbiased held-out result."
+        )
+        payload = load_dataset_with_test_as_val(args.dataset, args.use_features)
+        selection_mode = "test_accuracy"
+    else:
+        payload = load_dataset_train_test_only(args.dataset, args.use_features)
+        selection_mode = "train_loss"
+
     features = payload["features"]
     feature_dim = 0
     if features is not None:
@@ -338,11 +444,13 @@ def train(args):
         payload["y_train"],
         None if features is None else features["F_train"],
     )
-    val_ds = PPGDataset(
-        payload["X_val"],
-        payload["y_val"],
-        None if features is None else features["F_val"],
-    )
+    val_ds = None
+    if payload["X_val"] is not None:
+        val_ds = PPGDataset(
+            payload["X_val"],
+            payload["y_val"],
+            None if features is None else features["F_val"],
+        )
     test_ds = PPGDataset(
         payload["X_test"],
         payload["y_test"],
@@ -350,7 +458,7 @@ def train(args):
     )
 
     train_loader = DataLoader(train_ds, batch_size=args.batch, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=args.batch, shuffle=False)
+    val_loader = None if val_ds is None else DataLoader(val_ds, batch_size=args.batch, shuffle=False)
     test_loader = DataLoader(test_ds, batch_size=args.batch, shuffle=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
@@ -367,7 +475,7 @@ def train(args):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    best_val = -1.0
+    best_score = float("inf") if selection_mode == "train_loss" else -1.0
     best_path = args.out_dir / "best_model.pt"
     last_path = args.out_dir / "last_checkpoint.pt"
     history = []
@@ -379,17 +487,24 @@ def train(args):
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        best_val = float(checkpoint.get("best_val_accuracy", -1.0))
+        if selection_mode == "train_loss" and "best_score" not in checkpoint:
+            best_score = float(checkpoint.get("best_train_loss", best_score))
+        elif "best_score" in checkpoint:
+            best_score = float(checkpoint["best_score"])
+        else:
+            best_score = float(checkpoint.get("best_val_accuracy", best_score))
         history = checkpoint.get("history", [])
         stale = int(checkpoint.get("stale", 0))
         start_epoch = int(checkpoint["epoch"]) + 1
-        print(f"Resuming from epoch {checkpoint['epoch']} with best val accuracy {best_val:.4f}")
+        print(f"Resuming from epoch {checkpoint['epoch']} with best {selection_mode} score {best_score:.4f}")
     elif args.resume:
         print("Resume requested, but no last_checkpoint.pt was found. Starting from scratch.")
 
     print("Device:", device)
+    print("Mode: train/test only" if val_loader is None else f"Mode: {selection_mode}")
     print("Train:", payload["X_train"].shape, np.unique(payload["y_train"], return_counts=True))
-    print("Val:  ", payload["X_val"].shape, np.unique(payload["y_val"], return_counts=True))
+    if payload["X_val"] is not None:
+        print("Val:  ", payload["X_val"].shape, np.unique(payload["y_val"], return_counts=True))
     print("Test: ", payload["X_test"].shape, np.unique(payload["y_test"], return_counts=True))
     print("Use features:", args.use_features, "feature_dim:", feature_dim)
 
@@ -403,29 +518,37 @@ def train(args):
             recon_rate=args.recon_rate,
             train=True,
         )
-        val_metrics, _, _ = run_epoch(
-            model,
-            val_loader,
-            optimizer,
-            device,
-            mask_ratio=0.0,
-            recon_rate=0.0,
-            train=False,
-        )
+        val_metrics = None
+        if val_loader is not None:
+            val_metrics, _, _ = run_epoch(
+                model,
+                val_loader,
+                optimizer,
+                device,
+                mask_ratio=0.0,
+                recon_rate=0.0,
+                train=False,
+            )
         scheduler.step()
 
-        row = {"epoch": epoch, "train": train_metrics, "val": val_metrics}
+        row = {"epoch": epoch, "train": train_metrics}
+        if val_metrics is not None:
+            row["val"] = val_metrics
         history.append(row)
 
-        if val_metrics["accuracy"] > best_val:
-            best_val = val_metrics["accuracy"]
+        current_score = train_metrics["loss"] if selection_mode == "train_loss" else val_metrics["accuracy"]
+        improved = current_score < best_score if selection_mode == "train_loss" else current_score > best_score
+
+        if improved:
+            best_score = current_score
             stale = 0
             torch.save(
                 {
                     "model_state_dict": model.state_dict(),
                     "args": vars(args),
                     "feature_dim": feature_dim,
-                    "best_val_accuracy": best_val,
+                    "best_score": best_score,
+                    "selection_mode": selection_mode,
                 },
                 best_path,
             )
@@ -440,7 +563,8 @@ def train(args):
                 "scheduler_state_dict": scheduler.state_dict(),
                 "args": vars(args),
                 "feature_dim": feature_dim,
-                "best_val_accuracy": best_val,
+                "best_score": best_score,
+                "selection_mode": selection_mode,
                 "history": history,
                 "stale": stale,
             },
@@ -450,12 +574,16 @@ def train(args):
         if epoch == 1 or epoch % args.print_every == 0:
             print(
                 f"Epoch {epoch:03d} | "
-                f"train loss {train_metrics['loss']:.4f} acc {train_metrics['accuracy']:.4f} | "
-                f"val loss {val_metrics['loss']:.4f} acc {val_metrics['accuracy']:.4f} "
-                f"sen {val_metrics['sensitivity']:.4f} spe {val_metrics['specificity']:.4f}"
+                f"train loss {train_metrics['loss']:.4f} acc {train_metrics['accuracy']:.4f}"
+                + (
+                    f" | val loss {val_metrics['loss']:.4f} acc {val_metrics['accuracy']:.4f} "
+                    f"sen {val_metrics['sensitivity']:.4f} spe {val_metrics['specificity']:.4f}"
+                    if val_metrics is not None
+                    else ""
+                )
             )
 
-        if args.patience > 0 and stale >= args.patience:
+        if val_loader is not None and args.patience > 0 and stale >= args.patience:
             print(f"Early stopping at epoch {epoch}.")
             break
 
@@ -474,7 +602,8 @@ def train(args):
     subject_metrics, subject_rows = subject_level_metrics(payload["sid_test"], test_y, test_prob)
 
     result = {
-        "best_val_accuracy": float(best_val),
+        "selection_mode": selection_mode,
+        "best_score": float(best_score),
         "window_level_test": test_metrics,
         "subject_level_test": subject_metrics,
         "subject_rows": subject_rows,
@@ -482,7 +611,7 @@ def train(args):
     }
     (args.out_dir / "results.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
 
-    print("\nBest val accuracy:", best_val)
+    print(f"\nBest {selection_mode} score:", best_score)
     print("Window-level test:", test_metrics)
     print("Subject-level test:", subject_metrics)
     print("Saved model:", best_path)
@@ -510,6 +639,16 @@ def parse_args():
     parser.add_argument("--use-features", action="store_true")
     parser.add_argument("--cpu", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--use-validation",
+        action="store_true",
+        help="Split train subjects into train/validation subjects and select best model by validation accuracy.",
+    )
+    parser.add_argument(
+        "--test-as-val",
+        action="store_true",
+        help="Legacy/debug mode: use the test split as validation/inference monitoring.",
+    )
     return parser.parse_args()
 
 

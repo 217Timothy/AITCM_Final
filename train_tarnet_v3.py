@@ -17,6 +17,7 @@ Model input:
 Usage:
     python3 preprocess_v3_tarnet.py
     python3 train_tarnet_v3.py --epochs 80 --use-features
+    python3 train_tarnet_v3.py --epochs 80 --use-features --resume
 """
 
 from __future__ import annotations
@@ -359,8 +360,23 @@ def train(args):
     args.out_dir.mkdir(parents=True, exist_ok=True)
     best_val = -1.0
     best_path = args.out_dir / "best_model.pt"
+    last_path = args.out_dir / "last_checkpoint.pt"
     history = []
     stale = 0
+    start_epoch = 1
+
+    if args.resume and last_path.exists():
+        checkpoint = torch.load(last_path, map_location=device, weights_only=False)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        best_val = float(checkpoint.get("best_val_accuracy", -1.0))
+        history = checkpoint.get("history", [])
+        stale = int(checkpoint.get("stale", 0))
+        start_epoch = int(checkpoint["epoch"]) + 1
+        print(f"Resuming from epoch {checkpoint['epoch']} with best val accuracy {best_val:.4f}")
+    elif args.resume:
+        print("Resume requested, but no last_checkpoint.pt was found. Starting from scratch.")
 
     print("Device:", device)
     print("Train:", payload["X_train"].shape, np.unique(payload["y_train"], return_counts=True))
@@ -368,7 +384,7 @@ def train(args):
     print("Test: ", payload["X_test"].shape, np.unique(payload["y_test"], return_counts=True))
     print("Use features:", args.use_features, "feature_dim:", feature_dim)
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
         train_metrics, _, _ = run_epoch(
             model,
             train_loader,
@@ -406,6 +422,21 @@ def train(args):
             )
         else:
             stale += 1
+
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+                "args": vars(args),
+                "feature_dim": feature_dim,
+                "best_val_accuracy": best_val,
+                "history": history,
+                "stale": stale,
+            },
+            last_path,
+        )
 
         if epoch == 1 or epoch % args.print_every == 0:
             print(
@@ -469,6 +500,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use-features", action="store_true")
     parser.add_argument("--cpu", action="store_true")
+    parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
 
 

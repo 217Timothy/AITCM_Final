@@ -132,6 +132,7 @@ python3 tarnet_v3_pipeline.py --prepare-only
 
 **輸出：**
 - `trained_models/self_tarnet_v3/best_model.pt`
+- `trained_models/self_tarnet_v3/last_checkpoint.pt`
 - `trained_models/self_tarnet_v3/results.json`
 
 **使用方式：**
@@ -139,6 +140,12 @@ python3 tarnet_v3_pipeline.py --prepare-only
 ```bash
 python3 preprocess_v3_tarnet.py
 python3 train_tarnet_v3.py --epochs 80 --use-features
+```
+
+如果訓練中斷，可以從上一個 epoch 的 checkpoint 繼續：
+
+```bash
+python3 train_tarnet_v3.py --epochs 80 --use-features --resume
 ```
 
 ---

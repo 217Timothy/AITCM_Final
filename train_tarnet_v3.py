@@ -422,17 +422,19 @@ def train(args):
 
     if args.use_validation:
         payload = load_dataset(args.dataset, args.val_size, args.seed, args.use_features)
-        selection_mode = "validation_accuracy"
-    elif args.test_as_val:
+        monitor_name = "val"
+    elif args.monitor == "test":
         print(
-            "WARNING: --test-as-val uses the test set for model selection. "
-            "The final test metrics are inference-style monitoring, not an unbiased held-out result."
+            "WARNING: --monitor test reports test metrics during training. "
+            "Use these numbers as inference-style monitoring, not an unbiased held-out result."
         )
         payload = load_dataset_with_test_as_val(args.dataset, args.use_features)
-        selection_mode = "test_accuracy"
+        monitor_name = "test"
     else:
         payload = load_dataset_train_test_only(args.dataset, args.use_features)
-        selection_mode = "train_loss"
+        monitor_name = None
+
+    selection_mode = "train_loss"
 
     features = payload["features"]
     feature_dim = 0
@@ -504,7 +506,7 @@ def train(args):
     print("Mode: train/test only" if val_loader is None else f"Mode: {selection_mode}")
     print("Train:", payload["X_train"].shape, np.unique(payload["y_train"], return_counts=True))
     if payload["X_val"] is not None:
-        print("Val:  ", payload["X_val"].shape, np.unique(payload["y_val"], return_counts=True))
+        print(f"Monitor ({monitor_name}):", payload["X_val"].shape, np.unique(payload["y_val"], return_counts=True))
     print("Test: ", payload["X_test"].shape, np.unique(payload["y_test"], return_counts=True))
     print("Use features:", args.use_features, "feature_dim:", feature_dim)
 
@@ -536,8 +538,8 @@ def train(args):
             row["val"] = val_metrics
         history.append(row)
 
-        current_score = train_metrics["loss"] if selection_mode == "train_loss" else val_metrics["accuracy"]
-        improved = current_score < best_score if selection_mode == "train_loss" else current_score > best_score
+        current_score = train_metrics["loss"]
+        improved = current_score < best_score
 
         if improved:
             best_score = current_score
@@ -576,14 +578,14 @@ def train(args):
                 f"Epoch {epoch:03d} | "
                 f"train loss {train_metrics['loss']:.4f} acc {train_metrics['accuracy']:.4f}"
                 + (
-                    f" | val loss {val_metrics['loss']:.4f} acc {val_metrics['accuracy']:.4f} "
+                    f" | {monitor_name} loss {val_metrics['loss']:.4f} acc {val_metrics['accuracy']:.4f} "
                     f"sen {val_metrics['sensitivity']:.4f} spe {val_metrics['specificity']:.4f}"
                     if val_metrics is not None
                     else ""
                 )
             )
 
-        if val_loader is not None and args.patience > 0 and stale >= args.patience:
+        if args.use_validation and args.patience > 0 and stale >= args.patience:
             print(f"Early stopping at epoch {epoch}.")
             break
 
@@ -603,6 +605,7 @@ def train(args):
 
     result = {
         "selection_mode": selection_mode,
+        "monitor": monitor_name,
         "best_score": float(best_score),
         "window_level_test": test_metrics,
         "subject_level_test": subject_metrics,
@@ -645,15 +648,23 @@ def parse_args():
         help="Split train subjects into train/validation subjects and select best model by validation accuracy.",
     )
     parser.add_argument(
+        "--monitor",
+        choices=["none", "test"],
+        default="none",
+        help="Print monitoring metrics during training. Use `test` to monitor on the test split.",
+    )
+    parser.add_argument(
         "--test-as-val",
         action="store_true",
-        help="Legacy/debug mode: use the test split as validation/inference monitoring.",
+        help="Deprecated alias for --monitor test.",
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    if args.test_as_val:
+        args.monitor = "test"
     np.random.seed(args.seed)
     train(args)
 

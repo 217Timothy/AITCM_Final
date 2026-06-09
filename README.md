@@ -128,7 +128,8 @@ python3 tarnet_v3_pipeline.py --prepare-only
 - 使用前處理產生的 subject-level train/test split
 - 預設只使用 train 和 test，不另外切 validation
 - 用 train loss 儲存訓練期間最佳模型
-- 訓練完成後才用 test 輸出 window-level 與 subject-level results
+- 可用 `--monitor test` 在訓練過程中查看 test/inference-style 指標
+- 訓練完成後用 test 輸出 window-level 與 subject-level results
 
 **輸出：**
 - `trained_models/self_tarnet_v3/best_model.pt`
@@ -139,13 +140,13 @@ python3 tarnet_v3_pipeline.py --prepare-only
 
 ```bash
 python3 preprocess_v3_tarnet.py
-python3 train_tarnet_v3.py --epochs 80 --use-features
+python3 train_tarnet_v3.py --epochs 80 --use-features --monitor test
 ```
 
 如果訓練中斷，可以從上一個 epoch 的 checkpoint 繼續：
 
 ```bash
-python3 train_tarnet_v3.py --epochs 80 --use-features --resume
+python3 train_tarnet_v3.py --epochs 80 --use-features --monitor test --resume
 ```
 
 如果想做較嚴謹的 train/validation/test 實驗，可以加 `--use-validation`，它會只從 train subjects 裡再切 validation subjects：
@@ -154,7 +155,7 @@ python3 train_tarnet_v3.py --epochs 80 --use-features --resume
 python3 train_tarnet_v3.py --epochs 80 --use-features --use-validation
 ```
 
-除非只是 debug，不建議使用 `--test-as-val`，因為它會讓 test set 參與 best model selection。
+`--monitor test` 會在訓練過程中印出 test 指標，方便觀察 inference-style 表現；best model 仍然依 train loss 儲存。
 
 ---
 
